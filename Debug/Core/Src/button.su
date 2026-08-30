@@ -1,5 +1,2 @@
-../Core/Src/button.c:12:6:Button_Init	8	static
-../Core/Src/button.c:21:6:Button_EXTI_Callback	16	static
-../Core/Src/button.c:30:6:Button_Poll	16	static
-../Core/Src/button.c:53:6:Button_ConsumePressEvent	4	static
-../Core/Src/button.c:62:15:Button_ReadRaw	8	static
+../Core/Src/button.c:5:6:Button_Init	8	static
+../Core/Src/button.c:10:6:Button_ConsumePressEvent	16	static

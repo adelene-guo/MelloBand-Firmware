@@ -8,25 +8,19 @@ extern "C" {
 #include "main.h"
 #include <stdbool.h>
 
-/* MODE_TOGGLE button, sensed through the analog input-conditioning
- * front end (clamp + RC filter + unity buffer + 0.6x attenuator) and
- * landing on PC13. Idle sits around 0.6*VCC, pressed pulls to ~0V, so
- * we treat PC13 as an active-low digital input and debounce in
- * software (PC13 has no usable analog range here, and the front-end
- * RC filter already does most of the anti-bounce work for contact
- * noise; the software debounce below guards against the remaining
- * multi-triggering during a human press/release). */
+/* MODE_TOGGLE button, plain polling -- no EXTI, no interrupt, no
+ * debounce timer. Treats a HIGH read on BUTTON_Pin (PC13) as
+ * "pressed". Call Button_Init() once at boot, then call
+ * Button_ConsumePressEvent() every main-loop iteration. */
+
 void Button_Init(void);
 
-void Button_EXTI_Callback(void);
-
-/* Debounced level-change detector. Call from the main loop so a press
- * still registers if EXTI misses the analog-conditioned edge. */
-void Button_Poll(void);
-
+/* Reads the pin right now and compares it to the last poll. Returns
+ * true exactly once per low->high transition (i.e. once per press,
+ * as long as you call this often enough that you don't miss a
+ * transition -- there's no debounce, so a mechanically noisy switch
+ * may register more than one event per physical press). */
 bool Button_ConsumePressEvent(void);
-
-GPIO_PinState Button_ReadRaw(void);
 
 #ifdef __cplusplus
 }

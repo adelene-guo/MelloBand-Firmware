@@ -1,5 +1,0 @@
-../Drivers/CMSIS/Include/core_cm4.h:2064:26:ITM_SendChar	16	static,ignoring_inline_asm
-../Core/Src/debug.c:7:13:swo_init	4	static
-../Core/Src/debug.c:21:13:usart2_tx_init	40	static
-../Core/Src/debug.c:43:6:DebugConsole_Init	8	static
-../Core/Src/debug.c:49:5:__io_putchar	16	static

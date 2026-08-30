@@ -1,8 +1,5 @@
 #include "gpio.h"
 
-/* Initialize board GPIOs used by the application (motors, LEDs,
- * charge-status input, and button EXTI). Timer/I2C alternate
- * configurations are performed in tim.c and i2c.c respectively. */
 void GPIO_Init(void)
 {
     GPIO_InitTypeDef gi = {0};
@@ -13,8 +10,8 @@ void GPIO_Init(void)
     __HAL_RCC_SYSCFG_CLK_ENABLE();
 
     /* MOTOR_EN (PA0) - shared hardware enable for U5/U6/U7. Start low
-     * (drivers held in shutdown) until DRV2605_InitAll() is ready to
-     * bring them up, so we never chatter I2C at a powered-down chip. */
+     * (drivers held in shutdown) until DRV2605_PowerUp() (called from
+     * Haptic_NextPattern on the first button press) brings them up. */
     HAL_GPIO_WritePin(MOTOR_EN_GPIO_Port, MOTOR_EN_Pin, GPIO_PIN_RESET);
     gi.Pin = MOTOR_EN_Pin;
     gi.Mode = GPIO_MODE_OUTPUT_PP;
@@ -22,23 +19,10 @@ void GPIO_Init(void)
     gi.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(MOTOR_EN_GPIO_Port, &gi);
 
-    /* Charge-status RGB LED (D3) is common-anode: pin HIGH = channel off.
-     * Drive all high so D3 stays dark during motor/button bring-up. */
-    HAL_GPIO_WritePin(CHG_LED_R_GPIO_Port, CHG_LED_R_Pin, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(CHG_LED_G_GPIO_Port, CHG_LED_G_Pin, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(CHG_LED_B_GPIO_Port, CHG_LED_B_Pin, GPIO_PIN_SET);
-
-    gi.Pin = CHG_LED_R_Pin;
-    gi.Mode = GPIO_MODE_OUTPUT_PP;
-    gi.Pull = GPIO_NOPULL;
-    gi.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(CHG_LED_R_GPIO_Port, &gi);
-
-    gi.Pin = CHG_LED_G_Pin;
-    HAL_GPIO_Init(CHG_LED_G_GPIO_Port, &gi);
-
-    gi.Pin = CHG_LED_B_Pin;
-    HAL_GPIO_Init(CHG_LED_B_GPIO_Port, &gi);
+    /* Charge-status RGB LED (D3) is initialized by RGB_ChargeLED_Init()
+     * in rgb_led.c (R is plain GPIO, G is TIM12 PWM, B is analog/idle)
+     * -- not configured here, to avoid two files fighting over the
+     * same pins. */
 
     /* Heartbeat/status LED (D5) on PB4 (MCU_STATUS_SIG) */
     HAL_GPIO_WritePin(STATUS_LED_GPIO_Port, STATUS_LED_Pin, GPIO_PIN_RESET);
@@ -55,19 +39,33 @@ void GPIO_Init(void)
     gi.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(CHG_STAT_GPIO_Port, &gi);
 
-    /* MODE_TOGGLE (PC13) through the analog front end. Idle is ~0.6*VCC
-     * (in the CMOS undefined band), so fire EXTI on either edge and
-     * also poll in software -- see button.c. */
+    /* MODE_TOGGLE button input (PC13), plain polled input -- read
+     * directly by Button_ConsumePressEvent() in button.c, no
+     * interrupt/NVIC involved. */
     gi.Pin = BUTTON_Pin;
-    gi.Mode = GPIO_MODE_IT_RISING_FALLING;
-    gi.Pull = GPIO_PULLUP;
+    gi.Mode = GPIO_MODE_INPUT;
+    gi.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(BUTTON_GPIO_Port, &gi);
 
-    HAL_NVIC_SetPriority(BUTTON_EXTI_IRQn, 2, 0);
-    HAL_NVIC_EnableIRQ(BUTTON_EXTI_IRQn);
+    /* MOTOR_PWM_A/B/C (PA6/PA7/PB0): these physically connect to the
+     * DRV2605 IN/TRIG pins, but this design drives motor amplitude
+     * over I2C (Real-Time-Playback mode) instead, per haptic.c -- see
+     * tim.h. Park them as analog so they're not left as
+     * undriven/floating digital inputs. */
+    gi.Pin = MOTOR_PWM_A_Pin;
+    gi.Mode = GPIO_MODE_ANALOG;
+    gi.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(MOTOR_PWM_A_GPIO_Port, &gi);   /* PA6 */
 
-    /* Note: MOTOR_PWM_A/B/C (PA6/PA7/PB0) and MODE_IND_R/G/B
-     * (PA8/PA9/PA10) are configured for their timer alternate
-     * functions in tim.c, and MOTOR_SCL/SDA (PB8/PB9) for I2C1 in
-     * i2c.c. */
+    gi.Pin = MOTOR_PWM_B_Pin;
+    HAL_GPIO_Init(MOTOR_PWM_B_GPIO_Port, &gi);   /* PA7 */
+
+    gi.Pin = MOTOR_PWM_C_Pin;
+    HAL_GPIO_Init(MOTOR_PWM_C_GPIO_Port, &gi);   /* PB0 */
+
+    /* Note: MODE_IND_R/G/B (PA8/PA9/PA10) get their timer alternate
+     * function from TIM1_RGB_Init() in tim.c, CHARGE_STATUS_G
+     * (PB14) from TIM12_ChargeLED_Init(), and MOTOR_SCL/SDA
+     * (PB8/PB9) from I2C1_Init() in i2c.c -- not configured here, for
+     * the same one-owner-per-pin reason as the charge LED above. */
 }

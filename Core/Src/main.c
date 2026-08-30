@@ -1,19 +1,20 @@
 /**
- * main.c -- MINIMAL BRING-UP TEST
+ * main.c -- BRING-UP TEST + MODE LED COLOR CYCLE
  *
- * Does exactly three things:
- *   1. Turns the mode-indicator RGB LED (D2) solid purple.
- *   2. Turns the charge-status RGB LED (D3) solid green (always -- no
- *      STAT reading yet).
- *   3. Drives all three DRV2605 motors via PWM at 50% duty for 3
- *      seconds, then stops.
+ * On boot:
+ *   1. Charge-status RGB LED (D3) goes solid green (always -- no STAT
+ *      reading yet).
+ *   2. Mode-indicator RGB LED (D2) starts Teal.
+ *   3. All three DRV2605 motors run via PWM at 50% duty for 3 seconds,
+ *      then stop.
  *
- * This intentionally bypasses gpio.c / haptic.c / charge_status.c /
- * button.c / rgb_led.c -- they're untouched in the project and will
- * be wired back in once this basic hardware bring-up is confirmed
- * working. TIM1 (mode LED), TIM3 (motor PWM), and I2C1 are still
- * reused from tim.c / i2c.c since those are just peripheral init and
- * not tied to the removed pattern/session logic.
+ * After that, each MODE_TOGGLE button press cycles the mode LED:
+ *   Teal -> Blue -> Purple -> Teal -> ...
+ *
+ * Still intentionally bypasses haptic.c / charge_status.c / rgb_led.c
+ * -- those stay untouched in the project for when the full
+ * breathing-pattern/session logic comes back. gpio.c and button.c ARE
+ * now in use (button.c plain-polls PC13, no interrupt).
  *
  * Note: PWM alone does not make the DRV2605 vibrate -- it powers up
  * in standby by default and ignores IN/TRIG until told over I2C to
@@ -21,30 +22,61 @@
  */
 
 #include "main.h"
+#include "gpio.h"
 #include "tim.h"
 #include "i2c.h"
 #include "drv2605.h"
+#include "button.h"
 
 static void SystemClock_Config(void);
-static void GPIO_BringUp_Init(void);
+
+/* Teal -> Blue -> Purple, cycled by button press. */
+typedef struct { uint8_t r, g, b; } rgb_t;
+static const rgb_t s_mode_colors[3] = {
+    { 180, 0, 0 },   /* Teal   */
+    { 255,   255, 0 },   /* Blue   */
+    { 180,  255, 0 },  /* Purple */
+};
+#define NUM_MODE_COLORS  (sizeof(s_mode_colors) / sizeof(s_mode_colors[0]))
+static uint8_t s_mode_color_idx = 0;
 
 int main(void)
 {
     HAL_Init();
     SystemClock_Config();
-
-    GPIO_BringUp_Init();
+    GPIO_Init();
     TIM1_RGB_Init();
     TIM3_Motor_Init();
     I2C1_Init();
+    Button_Init();
 
-    /* Charge LED: solid green, always. */
-    HAL_GPIO_WritePin(CHG_LED_R_GPIO_Port, CHG_LED_R_Pin, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(CHG_LED_G_GPIO_Port, CHG_LED_G_Pin, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(CHG_LED_B_GPIO_Port, CHG_LED_B_Pin, GPIO_PIN_RESET);
+    /* Charge LED: solid green, always. GPIO_Init() deliberately does
+     * NOT configure these pins (that's normally RGB_ChargeLED_Init()'s
+     * job in rgb_led.c, which this bring-up test bypasses) -- so we
+     * have to put them in output mode ourselves before writing to
+     * them, or the writes below are silently no-ops. */
+    {
+        GPIO_InitTypeDef gi = {0};
+        gi.Mode = GPIO_MODE_OUTPUT_PP;
+        gi.Pull = GPIO_NOPULL;
+        gi.Speed = GPIO_SPEED_FREQ_LOW;
 
-    /* Mode LED: solid purple. */
-    TIM_SetModeLED(160, 0, 255);
+        gi.Pin = CHG_LED_R_Pin;
+        HAL_GPIO_Init(CHG_LED_R_GPIO_Port, &gi);
+
+        gi.Pin = CHG_LED_G_Pin;
+        HAL_GPIO_Init(CHG_LED_G_GPIO_Port, &gi);
+
+        gi.Pin = CHG_LED_B_Pin;
+        HAL_GPIO_Init(CHG_LED_B_GPIO_Port, &gi);
+    }
+    HAL_GPIO_WritePin(CHG_LED_R_GPIO_Port, CHG_LED_R_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(CHG_LED_G_GPIO_Port, CHG_LED_G_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(CHG_LED_B_GPIO_Port, CHG_LED_B_Pin, GPIO_PIN_SET);
+
+    /* Mode LED: start on the first color in the cycle (Teal). */
+    s_mode_color_idx = 0;
+    TIM_SetModeLED(s_mode_colors[0].r, s_mode_colors[0].g, s_mode_colors[0].b);
 
     /* Power up the DRV2605s (shared EN line) and put them in
      * PWM/analog-input mode so they respond to the TIM3 PWM below.
@@ -66,38 +98,14 @@ int main(void)
     TIM_SetMotorDuty(2, 0);
     HAL_GPIO_WritePin(MOTOR_EN_GPIO_Port, MOTOR_EN_Pin, GPIO_PIN_RESET);
 
-    while (1) { }
-}
-
-/* Only what this bring-up test needs: MOTOR_EN and the charge LED's
- * three plain-GPIO pins. (PA6/PA7/PB0 and PA8/PA9/PA10 get their AF
- * config from TIM3_Motor_Init()/TIM1_RGB_Init() above, and PB8/PB9
- * from I2C1_Init().) */
-static void GPIO_BringUp_Init(void)
-{
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-
-    GPIO_InitTypeDef gi = {0};
-    gi.Mode = GPIO_MODE_OUTPUT_PP;
-    gi.Pull = GPIO_NOPULL;
-    gi.Speed = GPIO_SPEED_FREQ_LOW;
-
-    HAL_GPIO_WritePin(MOTOR_EN_GPIO_Port, MOTOR_EN_Pin, GPIO_PIN_RESET);
-    gi.Pin = MOTOR_EN_Pin;
-    HAL_GPIO_Init(MOTOR_EN_GPIO_Port, &gi);
-
-    HAL_GPIO_WritePin(CHG_LED_R_GPIO_Port, CHG_LED_R_Pin, GPIO_PIN_RESET);
-    gi.Pin = CHG_LED_R_Pin;
-    HAL_GPIO_Init(CHG_LED_R_GPIO_Port, &gi);
-
-    HAL_GPIO_WritePin(CHG_LED_G_GPIO_Port, CHG_LED_G_Pin, GPIO_PIN_RESET);
-    gi.Pin = CHG_LED_G_Pin;
-    HAL_GPIO_Init(CHG_LED_G_GPIO_Port, &gi);
-
-    HAL_GPIO_WritePin(CHG_LED_B_GPIO_Port, CHG_LED_B_Pin, GPIO_PIN_RESET);
-    gi.Pin = CHG_LED_B_Pin;
-    HAL_GPIO_Init(CHG_LED_B_GPIO_Port, &gi);
+    while (1) {
+        if (Button_ConsumePressEvent()) {
+            s_mode_color_idx = (uint8_t)((s_mode_color_idx + 1) % NUM_MODE_COLORS);
+            const rgb_t *c = &s_mode_colors[s_mode_color_idx];
+            TIM_SetModeLED(c->r, c->g, c->b);
+        }
+        HAL_Delay(5);
+    }
 }
 
 /**
