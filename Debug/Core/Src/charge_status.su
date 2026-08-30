@@ -1,0 +1,2 @@
+../Core/Src/charge_status.c:12:6:ChargeStatus_Init	16	static
+../Core/Src/charge_status.c:36:17:ChargeStatus_Update	16	static

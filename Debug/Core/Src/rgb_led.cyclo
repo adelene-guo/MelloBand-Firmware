@@ -1,0 +1,5 @@
+../Core/Src/rgb_led.c:15:6:RGB_ChargeLED_Init	1
+../Core/Src/rgb_led.c:41:6:RGB_ChargeLED_Red	1
+../Core/Src/rgb_led.c:48:6:RGB_ChargeLED_GreenSolid	1
+../Core/Src/rgb_led.c:54:6:RGB_ChargeLED_GreenOff	1
+../Core/Src/rgb_led.c:61:6:RGB_ChargeLED_GreenPulseUpdate	1

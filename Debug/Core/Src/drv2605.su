@@ -1,0 +1,7 @@
+../Core/Src/drv2605.c:8:19:DRV2605_WriteReg	32	static
+../Core/Src/drv2605.c:16:19:DRV2605_ReadReg	32	static
+../Core/Src/drv2605.c:31:19:DRV2605_PowerUp	16	static
+../Core/Src/drv2605.c:53:19:DRV2605_EnterPWMMode	16	static
+../Core/Src/drv2605.c:70:6:DRV2605_PowerDown	8	static
+../Core/Src/drv2605.c:76:19:DRV2605_SetRealtimeAmplitude	16	static
+../Core/Src/drv2605.c:83:19:DRV2605_PlayDoubleTap	16	static

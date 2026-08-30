@@ -1,0 +1,5 @@
+../Drivers/CMSIS/Include/core_cm4.h:2064:26:ITM_SendChar	4
+../Core/Src/debug.c:7:13:swo_init	1
+../Core/Src/debug.c:21:13:usart2_tx_init	1
+../Core/Src/debug.c:43:6:DebugConsole_Init	1
+../Core/Src/debug.c:49:5:__io_putchar	4

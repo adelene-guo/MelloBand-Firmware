@@ -1,0 +1,6 @@
+../Core/Src/tim.c:12:6:TIM1_RGB_Init	5
+../Core/Src/tim.c:59:6:TIM_SetModeLED	1
+../Core/Src/tim.c:66:6:TIM3_Motor_Init	5
+../Core/Src/tim.c:112:6:TIM_SetMotorDuty	9
+../Core/Src/tim.c:126:6:TIM12_ChargeLED_Init	3
+../Core/Src/tim.c:161:6:TIM_SetChargeGreenDuty	1
