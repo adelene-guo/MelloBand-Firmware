@@ -1,31 +1,24 @@
 /**
- * main.c -- MINIMAL MOTOR-PWM-ONLY TEST (looping)
+ * main.c -- MOTOR PWM + BUTTON-DRIVEN MODE LED
  *
- * Isolates just the DRV2605 PWM path: no button, no mode LED
- * cycling, no charge LED. The mode LED is only used here as a
- * pass/fail indicator so you can tell "I2C never ACKed" apart from
- * "I2C worked but the motors don't move":
+ * Consolidates the validated DRV2605 PWM-mode motor path with
+ * button-driven mode LED color cycling:
  *
- *   RED     (solid, stays)     -- DRV2605_EnterPWMMode() failed (I2C
- *                                  error). Check wiring/pull-ups
- *                                  before looking anywhere else -- if
- *                                  this is red, the PWM step below
- *                                  never even runs, ever.
- *   GREEN   (2s, repeating)    -- motors driven at 100% PWM duty.
- *   OFF     (1s, repeating)    -- motors off, in between buzzes.
+ *   Boot:
+ *     - DRV2605_EnterPWMMode() configures all three drivers. On
+ *       failure, mode LED goes solid RED and the program halts there
+ *       -- same pass/fail signal as the standalone motor test.
+ *     - On success, mode LED starts Teal, motors idle.
  *
- * This now loops forever (green 2s / off 1s) instead of running once,
- * specifically so you can't miss the buzz window by looking at the
- * board a few seconds late. If you watch it cycle green/off
- * repeatedly and still never feel/hear anything, I2C configuration is
- * confirmed working and the problem is downstream:
- *   - Check DRV2605 OUT+/OUT- actually reach the motor terminals.
- *   - Check MOTOR_EN (PA0) really reaches all three drivers' EN pins
- *     (continuity), not just one.
- *   - Check the motors themselves aren't dead/disconnected.
- *   - Bumped to 100% duty here (from 50%) in case duty was below a
- *     motor's minimum start voltage -- if it buzzes now but not at
- *     50%, that's your answer.
+ *   Each MODE_TOGGLE button press:
+ *     - Mode LED cycles Teal -> Blue -> Purple -> Teal -> ...
+ *     - All three motors buzz at 100% duty for ~300ms as haptic
+ *       confirmation of the press, then go back to idle.
+ *
+ * Still intentionally bypasses haptic.c (RTP-register breathing
+ * patterns) -- that's a separate, not-yet-validated control path;
+ * this file only uses the PWM-mode path that's now confirmed working.
+ * charge_status.c / rgb_led.c are likewise not wired in here.
  */
 
 #include "main.h"
@@ -33,8 +26,20 @@
 #include "tim.h"
 #include "i2c.h"
 #include "drv2605.h"
+#include "button.h"
 
 static void SystemClock_Config(void);
+static void BuzzMotors(uint16_t duration_ms);
+
+/* Teal -> Blue -> Purple, cycled by button press. */
+typedef struct { uint8_t r, g, b; } rgb_t;
+static const rgb_t s_mode_colors[3] = {
+    { 0, 180, 180 },   /* Teal   */
+    { 0,   0, 255 },   /* Blue   */
+    { 160,  0, 255 },  /* Purple */
+};
+#define NUM_MODE_COLORS  (sizeof(s_mode_colors) / sizeof(s_mode_colors[0]))
+static uint8_t s_mode_color_idx = 0;
 
 int main(void)
 {
@@ -42,28 +47,46 @@ int main(void)
     SystemClock_Config();
 
     GPIO_Init();
-    TIM1_RGB_Init();     /* mode LED, used here only as a pass/fail indicator */
+    TIM1_RGB_Init();     /* mode LED */
     TIM3_Motor_Init();   /* motor PWM on PA6/PA7/PB0 */
     I2C1_Init();
+    Button_Init();
 
     if (DRV2605_EnterPWMMode() != HAL_OK) {
         TIM_SetModeLED(255, 0, 0);   /* red: I2C failed, stop here for good */
         while (1) { }
     }
 
-    while (1) {
-        TIM_SetModeLED(0, 255, 0);   /* green: buzzing */
-        TIM_SetMotorDuty(0, 100);
-        TIM_SetMotorDuty(1, 100);
-        TIM_SetMotorDuty(2, 100);
-        HAL_Delay(2000);
+    /* Mode LED: start on the first color in the cycle (Teal). Motors
+     * stay idle until the first button press. */
+    s_mode_color_idx = 0;
+    TIM_SetModeLED(s_mode_colors[0].r, s_mode_colors[0].g, s_mode_colors[0].b);
 
-        TIM_SetModeLED(0, 0, 0);     /* off: paused between buzzes */
-        TIM_SetMotorDuty(0, 0);
-        TIM_SetMotorDuty(1, 0);
-        TIM_SetMotorDuty(2, 0);
-        HAL_Delay(1000);
+    while (1) {
+        if (Button_ConsumePressEvent()) {
+            s_mode_color_idx = (uint8_t)((s_mode_color_idx + 1) % NUM_MODE_COLORS);
+            const rgb_t *c = &s_mode_colors[s_mode_color_idx];
+            TIM_SetModeLED(c->r, c->g, c->b);
+
+            BuzzMotors(300);   /* haptic confirmation of the press */
+        }
+        HAL_Delay(5);
     }
+}
+
+/* All three motors on at 100% duty for duration_ms, then off. Blocks
+ * for the duration -- fine for a short confirmation buzz, but note
+ * button presses aren't polled again until this returns. */
+static void BuzzMotors(uint16_t duration_ms)
+{
+    TIM_SetMotorDuty(0, 100);
+    TIM_SetMotorDuty(1, 100);
+    TIM_SetMotorDuty(2, 100);
+    HAL_Delay(duration_ms);
+
+    TIM_SetMotorDuty(0, 0);
+    TIM_SetMotorDuty(1, 0);
+    TIM_SetMotorDuty(2, 0);
 }
 
 /**
