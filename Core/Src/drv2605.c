@@ -16,9 +16,9 @@ HAL_StatusTypeDef DRV2605_WriteReg(uint8_t reg, uint8_t value)
 HAL_StatusTypeDef DRV2605_ReadReg(uint8_t reg, uint8_t *value)
 {
     /* All three DRV2605Ls share one address/bus and (after
-     * DRV2605_PowerUp) identical register state, so they answer
-     * identically -- this is safe to use as an "is the bus alive"
-     * check or to poll GO/STATUS. */
+     * DRV2605_PowerUp / DRV2605_EnterPWMMode) identical register
+     * state, so they answer identically -- this is safe to use as an
+     * "is the bus alive" check or to poll GO/STATUS. */
     HAL_StatusTypeDef st = HAL_I2C_Master_Transmit(&hi2c1, DRV2605_I2C_ADDR_W8,
                                                      &reg, 1, DRV2605_I2C_TIMEOUT_MS);
     if (st != HAL_OK) return st;
@@ -50,17 +50,28 @@ HAL_StatusTypeDef DRV2605_PowerUp(void)
     return HAL_OK;
 }
 
+/* Power up and configure the DRV2605 devices to be driven by PWM on
+ * their IN/TRIG pin (see tim.c: TIM3 CH1-3 -> PA6/PA7/PB0).
+ * Returns HAL_OK on success or an I2C error status. */
 HAL_StatusTypeDef DRV2605_EnterPWMMode(void)
 {
     HAL_StatusTypeDef st;
 
     HAL_GPIO_WritePin(MOTOR_EN_GPIO_Port, MOTOR_EN_Pin, GPIO_PIN_SET);
-    HAL_Delay(2);
+    HAL_Delay(2);   /* >250us required before first I2C txn after EN */
 
+    /* FEEDBACK_CONTROL: N_ERM_LRA=0 -> ERM mode. */
     st = DRV2605_WriteReg(DRV2605_REG_FEEDBACK, 0x36);
     if (st != HAL_OK) return st;
 
-    st = DRV2605_WriteReg(DRV2605_REG_CONTROL3, DRV2605_CONTROL3_N_PWM_ANALOG);
+    /* CONTROL3, bit1 (N_PWM_ANALOG): 0 = PWM input on IN/TRIG
+     * (what we want), 1 = analog input. This is a "select analog"
+     * flag, not a "select PWM" flag, despite the name reading the
+     * other way -- so we explicitly write 0 here rather than any
+     * nonzero "PWM" bitmask. (0 is also the power-on-reset default,
+     * so this write isn't strictly required, but it's cheap
+     * insurance against relying on reset state.) */
+    st = DRV2605_WriteReg(DRV2605_REG_CONTROL3, 0x00);
     if (st != HAL_OK) return st;
 
     return DRV2605_WriteReg(DRV2605_REG_MODE, DRV2605_MODE_PWM_ANALOG);

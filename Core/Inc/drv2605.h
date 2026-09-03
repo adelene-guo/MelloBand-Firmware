@@ -35,8 +35,6 @@ extern "C" {
 
 #define DRV2605_LIBRARY_ROM_A       0x01
 
-#define DRV2605_CONTROL3_N_PWM_ANALOG   (1 << 1)   /* 0 = PWM input, 1 = analog input on IN/TRIG */
-
 /* ROM library "A" (ERM) effect IDs used here */
 #define DRV2605_EFFECT_STRONG_CLICK_100   1
 
@@ -45,6 +43,14 @@ extern "C" {
  * Real-Time-Playback mode with amplitude 0 (silent) ready for
  * Haptic_Update() to drive via DRV2605_SetRealtimeAmplitude(). */
 HAL_StatusTypeDef DRV2605_PowerUp(void);
+
+/* Bring all three drivers out of hardware shutdown (shared EN line),
+ * broadcast-configure ERM feedback, and select PWM/analog-input mode
+ * with PWM selected -- IN/TRIG (PA6/PA7/PB0, see tim.c TIM3_Motor_Init)
+ * now directly sets each motor's amplitude. Use this instead of
+ * DRV2605_PowerUp() when driving motors via TIM3 PWM rather than the
+ * RTP register. */
+HAL_StatusTypeDef DRV2605_EnterPWMMode(void);
 
 /* Drops the shared EN line low, hardware-shutting-down all three
  * drivers. Call at the end of a session. */

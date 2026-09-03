@@ -1,7 +1,7 @@
 ../Core/Src/drv2605.c:8:19:DRV2605_WriteReg	1
 ../Core/Src/drv2605.c:16:19:DRV2605_ReadReg	2
 ../Core/Src/drv2605.c:31:19:DRV2605_PowerUp	4
-../Core/Src/drv2605.c:53:19:DRV2605_EnterPWMMode	3
-../Core/Src/drv2605.c:70:6:DRV2605_PowerDown	1
-../Core/Src/drv2605.c:76:19:DRV2605_SetRealtimeAmplitude	1
-../Core/Src/drv2605.c:83:19:DRV2605_PlayDoubleTap	11
+../Core/Src/drv2605.c:56:19:DRV2605_EnterPWMMode	3
+../Core/Src/drv2605.c:81:6:DRV2605_PowerDown	1
+../Core/Src/drv2605.c:87:19:DRV2605_SetRealtimeAmplitude	1
+../Core/Src/drv2605.c:94:19:DRV2605_PlayDoubleTap	11

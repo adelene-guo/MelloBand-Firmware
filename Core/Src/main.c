@@ -1,24 +1,31 @@
 /**
- * main.c -- BRING-UP TEST + MODE LED COLOR CYCLE
+ * main.c -- MINIMAL MOTOR-PWM-ONLY TEST (looping)
  *
- * On boot:
- *   1. Charge-status RGB LED (D3) goes solid green (always -- no STAT
- *      reading yet).
- *   2. Mode-indicator RGB LED (D2) starts Teal.
- *   3. All three DRV2605 motors run via PWM at 50% duty for 3 seconds,
- *      then stop.
+ * Isolates just the DRV2605 PWM path: no button, no mode LED
+ * cycling, no charge LED. The mode LED is only used here as a
+ * pass/fail indicator so you can tell "I2C never ACKed" apart from
+ * "I2C worked but the motors don't move":
  *
- * After that, each MODE_TOGGLE button press cycles the mode LED:
- *   Teal -> Blue -> Purple -> Teal -> ...
+ *   RED     (solid, stays)     -- DRV2605_EnterPWMMode() failed (I2C
+ *                                  error). Check wiring/pull-ups
+ *                                  before looking anywhere else -- if
+ *                                  this is red, the PWM step below
+ *                                  never even runs, ever.
+ *   GREEN   (2s, repeating)    -- motors driven at 100% PWM duty.
+ *   OFF     (1s, repeating)    -- motors off, in between buzzes.
  *
- * Still intentionally bypasses haptic.c / charge_status.c / rgb_led.c
- * -- those stay untouched in the project for when the full
- * breathing-pattern/session logic comes back. gpio.c and button.c ARE
- * now in use (button.c plain-polls PC13, no interrupt).
- *
- * Note: PWM alone does not make the DRV2605 vibrate -- it powers up
- * in standby by default and ignores IN/TRIG until told over I2C to
- * enter PWM/analog-input mode. That's the one I2C write below.
+ * This now loops forever (green 2s / off 1s) instead of running once,
+ * specifically so you can't miss the buzz window by looking at the
+ * board a few seconds late. If you watch it cycle green/off
+ * repeatedly and still never feel/hear anything, I2C configuration is
+ * confirmed working and the problem is downstream:
+ *   - Check DRV2605 OUT+/OUT- actually reach the motor terminals.
+ *   - Check MOTOR_EN (PA0) really reaches all three drivers' EN pins
+ *     (continuity), not just one.
+ *   - Check the motors themselves aren't dead/disconnected.
+ *   - Bumped to 100% duty here (from 50%) in case duty was below a
+ *     motor's minimum start voltage -- if it buzzes now but not at
+ *     50%, that's your answer.
  */
 
 #include "main.h"
@@ -26,85 +33,36 @@
 #include "tim.h"
 #include "i2c.h"
 #include "drv2605.h"
-#include "button.h"
 
 static void SystemClock_Config(void);
-
-/* Teal -> Blue -> Purple, cycled by button press. */
-typedef struct { uint8_t r, g, b; } rgb_t;
-static const rgb_t s_mode_colors[3] = {
-    { 180, 0, 0 },   /* Teal   */
-    { 255,   255, 0 },   /* Blue   */
-    { 180,  255, 0 },  /* Purple */
-};
-#define NUM_MODE_COLORS  (sizeof(s_mode_colors) / sizeof(s_mode_colors[0]))
-static uint8_t s_mode_color_idx = 0;
 
 int main(void)
 {
     HAL_Init();
     SystemClock_Config();
+
     GPIO_Init();
-    TIM1_RGB_Init();
-    TIM3_Motor_Init();
+    TIM1_RGB_Init();     /* mode LED, used here only as a pass/fail indicator */
+    TIM3_Motor_Init();   /* motor PWM on PA6/PA7/PB0 */
     I2C1_Init();
-    Button_Init();
 
-    /* Charge LED: solid green, always. GPIO_Init() deliberately does
-     * NOT configure these pins (that's normally RGB_ChargeLED_Init()'s
-     * job in rgb_led.c, which this bring-up test bypasses) -- so we
-     * have to put them in output mode ourselves before writing to
-     * them, or the writes below are silently no-ops. */
-    {
-        GPIO_InitTypeDef gi = {0};
-        gi.Mode = GPIO_MODE_OUTPUT_PP;
-        gi.Pull = GPIO_NOPULL;
-        gi.Speed = GPIO_SPEED_FREQ_LOW;
-
-        gi.Pin = CHG_LED_R_Pin;
-        HAL_GPIO_Init(CHG_LED_R_GPIO_Port, &gi);
-
-        gi.Pin = CHG_LED_G_Pin;
-        HAL_GPIO_Init(CHG_LED_G_GPIO_Port, &gi);
-
-        gi.Pin = CHG_LED_B_Pin;
-        HAL_GPIO_Init(CHG_LED_B_GPIO_Port, &gi);
+    if (DRV2605_EnterPWMMode() != HAL_OK) {
+        TIM_SetModeLED(255, 0, 0);   /* red: I2C failed, stop here for good */
+        while (1) { }
     }
-    HAL_GPIO_WritePin(CHG_LED_R_GPIO_Port, CHG_LED_R_Pin, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(CHG_LED_G_GPIO_Port, CHG_LED_G_Pin, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(CHG_LED_B_GPIO_Port, CHG_LED_B_Pin, GPIO_PIN_SET);
-
-    /* Mode LED: start on the first color in the cycle (Teal). */
-    s_mode_color_idx = 0;
-    TIM_SetModeLED(s_mode_colors[0].r, s_mode_colors[0].g, s_mode_colors[0].b);
-
-    /* Power up the DRV2605s (shared EN line) and put them in
-     * PWM/analog-input mode so they respond to the TIM3 PWM below.
-     * All three chips share one I2C address on one bus, so this
-     * single write configures all three at once. */
-    HAL_GPIO_WritePin(MOTOR_EN_GPIO_Port, MOTOR_EN_Pin, GPIO_PIN_SET);
-    HAL_Delay(2); /* >250us required before first I2C txn after EN */
-    DRV2605_WriteReg(DRV2605_REG_MODE, DRV2605_MODE_PWM_ANALOG);
-
-    /* Motors on at 50% duty for 3 seconds. */
-    TIM_SetMotorDuty(0, 50);
-    TIM_SetMotorDuty(1, 50);
-    TIM_SetMotorDuty(2, 50);
-    HAL_Delay(3000);
-
-    /* Motors off, drivers back into shutdown. */
-    TIM_SetMotorDuty(0, 0);
-    TIM_SetMotorDuty(1, 0);
-    TIM_SetMotorDuty(2, 0);
-    HAL_GPIO_WritePin(MOTOR_EN_GPIO_Port, MOTOR_EN_Pin, GPIO_PIN_RESET);
 
     while (1) {
-        if (Button_ConsumePressEvent()) {
-            s_mode_color_idx = (uint8_t)((s_mode_color_idx + 1) % NUM_MODE_COLORS);
-            const rgb_t *c = &s_mode_colors[s_mode_color_idx];
-            TIM_SetModeLED(c->r, c->g, c->b);
-        }
-        HAL_Delay(5);
+        TIM_SetModeLED(0, 255, 0);   /* green: buzzing */
+        TIM_SetMotorDuty(0, 100);
+        TIM_SetMotorDuty(1, 100);
+        TIM_SetMotorDuty(2, 100);
+        HAL_Delay(2000);
+
+        TIM_SetModeLED(0, 0, 0);     /* off: paused between buzzes */
+        TIM_SetMotorDuty(0, 0);
+        TIM_SetMotorDuty(1, 0);
+        TIM_SetMotorDuty(2, 0);
+        HAL_Delay(1000);
     }
 }
 
