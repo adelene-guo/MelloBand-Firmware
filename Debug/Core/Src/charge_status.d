@@ -1,4 +1,5 @@
-Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
+Core/Src/charge_status.o: ../Core/Src/charge_status.c \
+ ../Core/Inc/charge_status.h ../Core/Inc/main.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h \
  ../Core/Inc/stm32f4xx_hal_conf.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_rcc.h \
@@ -28,9 +29,8 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h \
  ../Core/Inc/stm32f4xx_hal_tim.h ../Core/Inc/stm32f4xx_hal_tim_ex.h \
- ../Core/Inc/gpio.h ../Core/Inc/main.h ../Core/Inc/tim.h \
- ../Core/Inc/i2c.h ../Core/Inc/i2c.h ../Core/Inc/drv2605.h \
- ../Core/Inc/haptic.h ../Core/Inc/button.h ../Core/Inc/charge_status.h
+ ../Core/Inc/rgb_led.h ../Core/Inc/rgb_led.h ../Core/Inc/tim.h
+../Core/Inc/charge_status.h:
 ../Core/Inc/main.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h:
 ../Core/Inc/stm32f4xx_hal_conf.h:
@@ -62,12 +62,6 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h:
 ../Core/Inc/stm32f4xx_hal_tim.h:
 ../Core/Inc/stm32f4xx_hal_tim_ex.h:
-../Core/Inc/gpio.h:
-../Core/Inc/main.h:
+../Core/Inc/rgb_led.h:
+../Core/Inc/rgb_led.h:
 ../Core/Inc/tim.h:
-../Core/Inc/i2c.h:
-../Core/Inc/i2c.h:
-../Core/Inc/drv2605.h:
-../Core/Inc/haptic.h:
-../Core/Inc/button.h:
-../Core/Inc/charge_status.h:

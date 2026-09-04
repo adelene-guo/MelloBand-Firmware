@@ -1,17 +1,39 @@
 #include "haptic.h"
 #include "tim.h"
 #include "drv2605.h"
+#include <math.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 /* Box Breath: 4s in / 4s hold / 4s out / 4s hold, green
  * Deep Calm:  4s in / 1s hold / 6s out / 1s hold, blue
  * Coherent:   5s in / 0 hold  / 5s out / 0 hold,  purple
+ *
+ * Per-phase motor behavior:
+ *   inhale : continuous rise, 20% -> 85%, across the whole inhale duration
+ *   exhale : continuous fade, 85% -> 0%, across the whole exhale duration
+ *   hold   : one short buzz per second for the whole hold duration
+ *            (a 4s hold = 4 distinct buzzes, a 1s hold = 1 buzz)
  */
 static const haptic_pattern_t s_patterns[HAPTIC_NUM_PATTERNS] = {
     /* name               R    G    B   inhale hold1 exhale hold2 */
-    { "Box Breath",        0, 255,   0,  4000, 4000,  4000, 4000 },
-    { "Deep Calm",         0,   0, 255,  4000, 1000,  6000, 1000 },
-    { "Coherent Breath", 160,   0, 255,  5000,    0,  5000,    0 },
+    { "Box Breath",        255, 0,   255,  4000, 4000,  4000, 4000 },
+    { "Deep Calm",         255,   255, 0,  4000, 1000,  6000, 1000 },
+    { "Coherent Breath", 95,   255, 0,  5000,    0,  5000,    0 },
 };
+
+/* Inhale/exhale ramp update interval. Small enough that the amplitude
+ * change is imperceptibly smooth (a 4s inhale becomes ~160 steps
+ * instead of 20), not a fixed "waveform" -- these are ordinary RTP
+ * writes, just frequent ones. */
+#define RAMP_STEP_MS       25U
+
+/* Hold-phase buzz shape: a short pulse at the start of each 1-second
+ * slot, silent for the rest of that second. */
+#define HOLD_BUZZ_ON_MS    150U
+#define HOLD_BUZZ_AMP_PCT  70U
 
 typedef enum {
     PHASE_IDLE = 0,
@@ -25,11 +47,11 @@ typedef enum {
 static uint8_t  s_pattern_idx   = 0;
 static phase_t  s_phase         = PHASE_IDLE;
 static uint32_t s_phase_start   = 0;
-static uint8_t  s_cycle_count   = 0; /* counts until 5 sessions, then a double buzz*/
+static uint8_t  s_cycle_count   = 0; /* counts until SESSION_CYCLES, then a double buzz */
 static bool     s_session_active = false;
 
-static uint16_t s_last_step_index = 0xFFFF;  /* sentinel: forces a write on phase entry */
-static bool     s_last_pulse_on   = false;
+static uint16_t s_last_step_index = 0xFFFF;  /* sentinel: forces a write on phase entry (inhale/exhale) */
+static bool     s_last_pulse_on   = false;   /* tracks buzz on/off state (hold) */
 
 /* Convert 0..100 percentage to 0..255 amplitude for the DRV2605 RTP register. */
 static inline uint8_t pct_to_amp(uint8_t pct)
@@ -143,8 +165,35 @@ void Haptic_Update(void)
     switch (s_phase) {
 
     case PHASE_INHALE: {
-        /* Smooth rise 20% -> 85%, updated in 200ms steps. */
+        /* Smooth eased rise 20% -> 85% across the whole inhale
+         * duration, updated every RAMP_STEP_MS for a continuous feel
+         * (not a stepped/staircase ramp). */
         uint16_t dur = p->inhale_ms;
+        uint16_t total_steps = (dur / RAMP_STEP_MS);
+        if (total_steps == 0) total_steps = 1;
+        uint16_t step = (uint16_t)(elapsed / RAMP_STEP_MS);
+        if (step > total_steps) step = total_steps;
+
+        if (step != s_last_step_index) {
+            s_last_step_index = step;
+            float frac = (float)step / (float)total_steps;               /* 0..1 */
+            float eased = 0.5f * (1.0f - cosf((float)M_PI * frac));       /* slow-start/slow-end 0..1 */
+            uint8_t pct = (uint8_t)(20.0f + eased * (85.0f - 20.0f) + 0.5f);
+            DRV2605_SetRealtimeAmplitude(pct_to_amp(pct));
+        }
+
+        if (elapsed >= dur + 1000) {
+        	advance_from(PHASE_INHALE);
+        } else if (elapsed >= dur) {
+        	DRV2605_SetRealtimeAmplitude(0);
+        }
+        break;
+    }
+
+    case PHASE_EXHALE: {
+        /* Continuous fade 85% -> 0%, updated in 200ms steps across
+         * the whole exhale duration. */
+        uint16_t dur = p->exhale_ms;
         uint16_t total_steps = (dur / 200U);
         if (total_steps == 0) total_steps = 1;
         uint16_t step = (uint16_t)(elapsed / 200U);
@@ -152,53 +201,34 @@ void Haptic_Update(void)
 
         if (step != s_last_step_index) {
             s_last_step_index = step;
-            uint8_t pct = (uint8_t)(20U + ((uint32_t)(85U - 20U) * step) / total_steps);
+            uint8_t pct = (uint8_t)(85U - ((uint32_t)85U * step) / total_steps);
             DRV2605_SetRealtimeAmplitude(pct_to_amp(pct));
         }
 
         if (elapsed >= dur) {
-            advance_from(PHASE_INHALE);
+            DRV2605_SetRealtimeAmplitude(0);
+            advance_from(PHASE_EXHALE);
         }
         break;
     }
 
     case PHASE_HOLD1:
     case PHASE_HOLD2: {
-        /* Smooth fade 70% -> 10%, updated in 200ms steps, explicit
-         * off at the end of the hold. */
+        /* One short buzz per second for the whole hold duration:
+         * on for HOLD_BUZZ_ON_MS at the start of each 1-second slot,
+         * silent for the rest of that second. */
         uint16_t dur = (s_phase == PHASE_HOLD1) ? p->hold1_ms : p->hold2_ms;
-        uint16_t total_steps = (dur / 200U);
-        if (total_steps == 0) total_steps = 1;
-        uint16_t step = (uint16_t)(elapsed / 200U);
-        if (step > total_steps) step = total_steps;
+        uint32_t ms_into_second = elapsed % 1000U;
+        bool buzz_on = (ms_into_second < HOLD_BUZZ_ON_MS);
 
-        if (step != s_last_step_index) {
-            s_last_step_index = step;
-            uint8_t pct = (uint8_t)(70U - ((uint32_t)(70U - 10U) * step) / total_steps);
-            DRV2605_SetRealtimeAmplitude(pct_to_amp(pct));
-        }
-
-        if (elapsed >= dur) {
-            DRV2605_SetRealtimeAmplitude(0);   /* ...-> off */
-            advance_from(s_phase);
-        }
-        break;
-    }
-
-    case PHASE_EXHALE: {
-        /* Steady ~30% amplitude, pulsed at 1 Hz (500ms on / 500ms
-         * off), held constant (not ramped) for the whole exhale. */
-        uint16_t dur = p->exhale_ms;
-        bool on = (elapsed % 1000U) < 500U;
-
-        if (on != s_last_pulse_on) {
-            s_last_pulse_on = on;
-            DRV2605_SetRealtimeAmplitude(on ? pct_to_amp(30) : 0);
+        if (buzz_on != s_last_pulse_on) {
+            s_last_pulse_on = buzz_on;
+            DRV2605_SetRealtimeAmplitude(buzz_on ? pct_to_amp(HOLD_BUZZ_AMP_PCT) : 0);
         }
 
         if (elapsed >= dur) {
             DRV2605_SetRealtimeAmplitude(0);
-            advance_from(PHASE_EXHALE);
+            advance_from(s_phase);
         }
         break;
     }

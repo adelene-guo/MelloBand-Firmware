@@ -150,7 +150,11 @@ void TIM12_ChargeLED_Init(void)
     TIM_OC_InitTypeDef oc = {0};
     oc.OCMode = TIM_OCMODE_PWM1;
     oc.Pulse = 0;
-    oc.OCPolarity = TIM_OCPOLARITY_HIGH;
+    /* LOW polarity: this LED's cathode is on the GPIO side (LOW sinks
+     * current = ON), so a higher duty needs to mean "more LOW time",
+     * not "more HIGH time" -- TIM_SetChargeGreenDuty(255) should be
+     * full brightness, TIM_SetChargeGreenDuty(0) should be off. */
+    oc.OCPolarity = TIM_OCPOLARITY_LOW;
     oc.OCFastMode = TIM_OCFAST_DISABLE;
 
     if (HAL_TIM_PWM_ConfigChannel(&htim12, &oc, TIM_CHANNEL_1) != HAL_OK) Error_Handler();

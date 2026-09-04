@@ -1,24 +1,29 @@
 /**
- * main.c -- MOTOR PWM + BUTTON-DRIVEN MODE LED
+ * main.c -- BREATHING-PATTERN HAPTICS (RTP mode) + BUTTON + MODE LED
  *
- * Consolidates the validated DRV2605 PWM-mode motor path with
- * button-driven mode LED color cycling:
+ * Switches from the flat PWM buzz test to the actual breathing-
+ * pattern engine in haptic.c: motor amplitude is now driven entirely
+ * over I2C via the DRV2605 real-time-playback (RTP) register, not
+ * PWM -- a different control path from the one already validated by
+ * the standalone motor test. TIM3/PWM is intentionally NOT
+ * initialized here; the DRV2605 IN/TRIG pins (PA6/PA7/PB0) stay
+ * parked as analog (see gpio.c) since RTP mode doesn't use them.
  *
- *   Boot:
- *     - DRV2605_EnterPWMMode() configures all three drivers. On
- *       failure, mode LED goes solid RED and the program halts there
- *       -- same pass/fail signal as the standalone motor test.
- *     - On success, mode LED starts Teal, motors idle.
+ * Each MODE_TOGGLE button press starts (or advances to) the next
+ * breathing pattern:
+ *   Box Breath (green)  -> Deep Calm (blue) -> Coherent Breath (purple) -> ...
+ * Each session runs SESSION_CYCLES breathing cycles (see haptic.h),
+ * then plays a two-click end-of-session confirmation and powers the
+ * motors down automatically -- the next press starts a fresh session
+ * on the next pattern.
  *
- *   Each MODE_TOGGLE button press:
- *     - Mode LED cycles Teal -> Blue -> Purple -> Teal -> ...
- *     - All three motors buzz at 100% duty for ~300ms as haptic
- *       confirmation of the press, then go back to idle.
- *
- * Still intentionally bypasses haptic.c (RTP-register breathing
- * patterns) -- that's a separate, not-yet-validated control path;
- * this file only uses the PWM-mode path that's now confirmed working.
- * charge_status.c / rgb_led.c are likewise not wired in here.
+ * NOTE: this RTP path hasn't been physically confirmed yet the way
+ * the PWM path was -- if motors don't respond as expected here, that
+ * narrows the problem to RTP mode specifically (FEEDBACK_CONTROL /
+ * MODE register setup in DRV2605_PowerUp(), or the RTP register
+ * writes in DRV2605_SetRealtimeAmplitude()), not to I2C wiring in
+ * general, since the same bus already works for PWM-mode
+ * configuration writes.
  */
 
 #include "main.h"
@@ -26,20 +31,11 @@
 #include "tim.h"
 #include "i2c.h"
 #include "drv2605.h"
+#include "haptic.h"
 #include "button.h"
+#include "charge_status.h"
 
 static void SystemClock_Config(void);
-static void BuzzMotors(uint16_t duration_ms);
-
-/* Teal -> Blue -> Purple, cycled by button press. */
-typedef struct { uint8_t r, g, b; } rgb_t;
-static const rgb_t s_mode_colors[3] = {
-    { 0, 180, 180 },   /* Teal   */
-    { 0,   0, 255 },   /* Blue   */
-    { 160,  0, 255 },  /* Purple */
-};
-#define NUM_MODE_COLORS  (sizeof(s_mode_colors) / sizeof(s_mode_colors[0]))
-static uint8_t s_mode_color_idx = 0;
 
 int main(void)
 {
@@ -47,46 +43,21 @@ int main(void)
     SystemClock_Config();
 
     GPIO_Init();
-    TIM1_RGB_Init();     /* mode LED */
-    TIM3_Motor_Init();   /* motor PWM on PA6/PA7/PB0 */
+    TIM1_RGB_Init();   /* mode LED only -- no TIM3/PWM in this build */
     I2C1_Init();
     Button_Init();
+    ChargeStatus_Init();
 
-    if (DRV2605_EnterPWMMode() != HAL_OK) {
-        TIM_SetModeLED(255, 0, 0);   /* red: I2C failed, stop here for good */
-        while (1) { }
-    }
-
-    /* Mode LED: start on the first color in the cycle (Teal). Motors
-     * stay idle until the first button press. */
-    s_mode_color_idx = 0;
-    TIM_SetModeLED(s_mode_colors[0].r, s_mode_colors[0].g, s_mode_colors[0].b);
+    Haptic_Init();      /* motors stay powered down until the first button press */
 
     while (1) {
         if (Button_ConsumePressEvent()) {
-            s_mode_color_idx = (uint8_t)((s_mode_color_idx + 1) % NUM_MODE_COLORS);
-            const rgb_t *c = &s_mode_colors[s_mode_color_idx];
-            TIM_SetModeLED(c->r, c->g, c->b);
-
-            BuzzMotors(300);   /* haptic confirmation of the press */
+            Haptic_NextPattern();   /* Box Breath -> Deep Calm -> Coherent Breath -> ... */
         }
+        Haptic_Update();
+        ChargeStatus_Update();
         HAL_Delay(5);
     }
-}
-
-/* All three motors on at 100% duty for duration_ms, then off. Blocks
- * for the duration -- fine for a short confirmation buzz, but note
- * button presses aren't polled again until this returns. */
-static void BuzzMotors(uint16_t duration_ms)
-{
-    TIM_SetMotorDuty(0, 100);
-    TIM_SetMotorDuty(1, 100);
-    TIM_SetMotorDuty(2, 100);
-    HAL_Delay(duration_ms);
-
-    TIM_SetMotorDuty(0, 0);
-    TIM_SetMotorDuty(1, 0);
-    TIM_SetMotorDuty(2, 0);
 }
 
 /**

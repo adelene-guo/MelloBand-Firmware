@@ -3,4 +3,4 @@
 ../Core/Src/tim.c:66:6:TIM3_Motor_Init	72	static
 ../Core/Src/tim.c:112:6:TIM_SetMotorDuty	24	static
 ../Core/Src/tim.c:126:6:TIM12_ChargeLED_Init	64	static
-../Core/Src/tim.c:161:6:TIM_SetChargeGreenDuty	16	static
+../Core/Src/tim.c:165:6:TIM_SetChargeGreenDuty	16	static
